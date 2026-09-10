@@ -10,3 +10,6 @@ __pycache__/
 
 # SQLite
 *.db
+
+# 動画ファイル
+movie/
