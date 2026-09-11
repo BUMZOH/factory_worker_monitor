@@ -13,3 +13,9 @@ __pycache__/
 
 # 動画ファイル
 movie/
+
+# 画像ファイル
+image/
+
+# YOLO model files
+*.pt
