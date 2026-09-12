@@ -3,3 +3,6 @@
 
 # YOLO
 ultralytics
+
+# OpenCV
+opencv-python

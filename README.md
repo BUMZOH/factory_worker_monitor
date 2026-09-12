@@ -33,6 +33,7 @@ Version 1
 ```text
 app/
 ├─ app.py
+├─ run.bat
 ├─ yolov8n.pt
 ├─ csv/
 └─ movie/
@@ -64,7 +65,32 @@ Version 1では以下のモデルファイルを使用します。
 yolov8n.pt
 ```
 
-アプリ本体と同じフォルダへ配置してください。
+`yolov8n.pt` はGitリポジトリには含めません。
+`.gitignore` で `*.pt` を除外しています。
+
+初回セットアップ時に、Ultralyticsからモデルを取得してください。
+
+仮想環境へ必要パッケージをインストールしたあと、
+プロジェクトの `app` フォルダで次のコマンドを実行できます。
+
+```bash
+python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+```
+
+取得した `yolov8n.pt` は `app.py` と同じフォルダへ配置してください。
+
+```text
+app/
+├─ app.py
+├─ run.bat
+└─ yolov8n.pt
+```
+
+Ultralytics YOLOおよび学習済みモデルの利用条件については、
+Ultralytics公式のライセンス情報を確認してください。
+
+このプロジェクトのVersion 1は、GNU Affero General Public
+License v3.0（AGPL-3.0）の条件に従って公開する方針です。
 
 ## 起動方法
 
@@ -273,3 +299,10 @@ CSVを残す
 
 設定のJSON化や記録データの集計・動画結合などは、
 必要に応じて今後追加する想定です。
+
+## License
+
+このプロジェクトは GNU Affero General Public License v3.0
+（AGPL-3.0）の下で公開します。
+
+詳細はリポジトリ直下の `LICENSE` を参照してください。
