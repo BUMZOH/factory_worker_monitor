@@ -1,7 +1,7 @@
 import csv
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Speed up camera initialization on some USB cameras
@@ -27,26 +27,69 @@ IOU_THRESHOLD = 0.3     # default=0.7
 CSV_DIR = BASE_DIR / "csv"
 CSV_DIR.mkdir(exist_ok=True)
 
+# Camera settings
+# (Check the resolutions available in the Windows Camera app.)
+CAMERA_WIDTH = 1920
+CAMERA_HEIGHT = 1080
+
+# Save raw camera image at startup.
+SAVE_IMAGE = False
+IMAGE_PATH = Path.home() / "Desktop" / "worker_detect.png"
+
 # Video settings
 MOVIE_DIR = BASE_DIR / "movie"
 MOVIE_DIR.mkdir(exist_ok=True)
 
 VIDEO_FPS = 1.0
-VIDEO_HEIGHT = 600      # Width is calculated automatically.
+VIDEO_HEIGHT = 540      # Width is calculated automatically.
 
-# Working area ROI1
-ROI1_ENABLE = True
-ROI1_X1 = 150
-ROI1_Y1 = 150
-ROI1_X2 = 550
-ROI1_Y2 = 450
+# Display settings
+# (Set DISPLAY_HEIGHT smaller to allow for the taskbar and title bar.)
+DISPLAY_HEIGHT = 1000   # Width is calculated automatically.
 
-# Working area ROI2
-ROI2_ENABLE = True
-ROI2_X1 = 600
-ROI2_Y1 = 150
-ROI2_X2 = 800
-ROI2_Y2 = 450
+# Working area settings
+ROI_SETTINGS = [
+    {
+        "name": "ROI1",
+        "enable": True,
+        "x1": 600,
+        "y1": 340,
+        "x2": 1260,
+        "y2": 1060,
+    },
+    {
+        "name": "ROI2",
+        "enable": True,
+        "x1": 790,
+        "y1": 290,
+        "x2": 1440,
+        "y2": 940,
+    },
+    {
+        "name": "ROI3",
+        "enable": False,
+        "x1": 100,
+        "y1": 100,
+        "x2": 300,
+        "y2": 300,
+    },
+    {
+        "name": "ROI4",
+        "enable": False,
+        "x1": 100,
+        "y1": 100,
+        "x2": 300,
+        "y2": 300,
+    },
+    {
+        "name": "ROI5",
+        "enable": False,
+        "x1": 100,
+        "y1": 100,
+        "x2": 300,
+        "y2": 300,
+    },
+]
 
 
 # ================================================
@@ -69,7 +112,12 @@ CV2_GRAY = (128, 128, 128)
 #   Functions
 # ================================================
 def get_csv_path(measured_at: datetime) -> Path:
-    filename = measured_at.strftime(
+    factory_date = measured_at
+
+    if measured_at.hour < 4:
+        factory_date = measured_at - timedelta(days=1)
+
+    filename = factory_date.strftime(
         "worker_detection_%Y%m%d.csv"
     )
     return CSV_DIR / filename
@@ -77,8 +125,7 @@ def get_csv_path(measured_at: datetime) -> Path:
 
 def write_csv(
     measured_at: datetime,
-    roi1_result: int,
-    roi2_result: int,
+    roi_results: list[int],
 ) -> None:
     csv_path = get_csv_path(measured_at)
     file_exists = csv_path.exists()
@@ -87,20 +134,73 @@ def write_csv(
         writer = csv.writer(csv_file)
 
         if not file_exists:
-            writer.writerow(
-                [
-                    "measured_at",
-                    "roi1_result",
-                    "roi2_result",
-                ]
-            )
+            header = ["measured_at"]
 
-        writer.writerow(
-            [
-                measured_at.strftime("%Y-%m-%d %H:%M:%S"),
-                roi1_result,
-                roi2_result,
-            ]
+            for roi_no in range(len(ROI_SETTINGS)):
+                header.append(f"roi{roi_no + 1}_result")
+
+            writer.writerow(header)
+
+        row = [
+            measured_at.strftime("%Y-%m-%d %H:%M:%S"),
+            *roi_results,
+        ]
+
+        writer.writerow(row)
+
+
+def check_roi_detection(
+    center_x: int,
+    center_y: int,
+    roi_detected: list[bool],
+) -> None:
+    """Check whether a person's center point is inside each ROI."""
+    for index, roi in enumerate(ROI_SETTINGS):
+        if not roi["enable"]:
+            continue
+
+        if (
+            roi["x1"] <= center_x <= roi["x2"]
+            and roi["y1"] <= center_y <= roi["y2"]
+        ):
+            roi_detected[index] = True
+
+
+def draw_rois(
+    frame,
+    roi_detected: list[bool],
+) -> None:
+    """Draw all enabled ROIs and their detection status."""
+    for index, roi in enumerate(ROI_SETTINGS):
+        if not roi["enable"]:
+            continue
+
+        detected = roi_detected[index]
+
+        color = CV2_RED if detected else CV2_BLUE
+
+        cv2.rectangle(
+            frame,
+            (roi["x1"], roi["y1"]),
+            (roi["x2"], roi["y2"]),
+            color,
+            3,
+        )
+
+        status = (
+            f'{roi["name"]}: DETECTED'
+            if detected
+            else f'{roi["name"]}: NOT DETECTED'
+        )
+
+        cv2.putText(
+            frame,
+            status,
+            (roi["x1"], roi["y1"] - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            color,
+            2,
         )
 
 
@@ -123,6 +223,7 @@ def create_video_writer(
 
     # Add a sequential number to the filename if it already exists.
     file_no = 2
+
     while video_path.exists():
         video_path = MOVIE_DIR / f"{base_name}_{file_no}.mp4"
         file_no += 1
@@ -155,9 +256,8 @@ if not camera.isOpened():
     raise RuntimeError("Camera could not be opened.")
 
 # Set camera resolution.
-# (Check the resolutions available in the Windows Camera app.)
-camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
 
 # Get the camera image size.
 width = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -174,7 +274,6 @@ if video_width % 2 != 0:
 print(f"Camera resolution: {width} x {height}")
 print(f"Video resolution: {video_width} x {video_height}")
 
-
 # Start video recording.
 video_start_at = datetime.now()
 
@@ -187,6 +286,8 @@ video_writer, video_hour_start = create_video_writer(
 # Time when the CSV and video were last saved.
 last_record_time = 0.0
 
+# Whether the raw camera image has already been saved.
+image_saved = False
 
 try:
     while True:
@@ -194,6 +295,15 @@ try:
 
         if not success:
             break
+
+        # Save the raw camera image only once at startup.
+        if SAVE_IMAGE and not image_saved:
+            cv2.imwrite(
+                str(IMAGE_PATH),
+                frame,
+            )
+
+            image_saved = True
 
         # Detect persons using YOLO on every frame.
         result = model.predict(
@@ -204,8 +314,11 @@ try:
             verbose=False,      # Disable detailed output.
         )[0]
 
-        roi1_detected = False
-        roi2_detected = False
+        # Detection status for each ROI.
+        roi_detected = [
+            False
+            for _ in ROI_SETTINGS
+        ]
 
         for box in result.boxes:
             # Get the bounding box coordinates.
@@ -214,19 +327,12 @@ try:
             center_x = int((x1 + x2) / 2)
             center_y = int((y1 + y2) / 2)
 
-            if ROI1_ENABLE:
-                if (
-                    ROI1_X1 <= center_x <= ROI1_X2
-                    and ROI1_Y1 <= center_y <= ROI1_Y2
-                ):
-                    roi1_detected = True
-
-            if ROI2_ENABLE:
-                if (
-                    ROI2_X1 <= center_x <= ROI2_X2
-                    and ROI2_Y1 <= center_y <= ROI2_Y2
-                ):
-                    roi2_detected = True
+            # Check all ROIs.
+            check_roi_detection(
+                center_x,
+                center_y,
+                roi_detected,
+            )
 
             # Person bounding box
             cv2.rectangle(
@@ -246,64 +352,10 @@ try:
                 -1,                     # Filled circle
             )
 
-        # Draw the ROI1 work area.
-        if ROI1_ENABLE:
-            cv2.rectangle(
-                frame,
-                (ROI1_X1, ROI1_Y1),
-                (ROI1_X2, ROI1_Y2),
-                CV2_BLUE,
-                3,                      # Thickness
-            )
-
-        # Draw the ROI2 work area.
-        if ROI2_ENABLE:
-            cv2.rectangle(
-                frame,
-                (ROI2_X1, ROI2_Y1),
-                (ROI2_X2, ROI2_Y2),
-                CV2_YELLOW,
-                3,                      # Thickness
-            )
-
-        # ROI1 detection status
-        if ROI1_ENABLE:
-            roi1_status = (
-                "ROI1: DETECTED"
-                if roi1_detected
-                else "ROI1: NOT DETECTED"
-            )
-        else:
-            roi1_status = "ROI1: DISABLED"
-
-        cv2.putText(
+        # Draw all enabled ROIs.
+        draw_rois(
             frame,
-            roi1_status,
-            (20, 40),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            CV2_RED,
-            2,
-        )
-
-        # ROI2 detection status
-        if ROI2_ENABLE:
-            roi2_status = (
-                "ROI2: DETECTED"
-                if roi2_detected
-                else "ROI2: NOT DETECTED"
-            )
-        else:
-            roi2_status = "ROI2: DISABLED"
-
-        cv2.putText(
-            frame,
-            roi2_status,
-            (20, 80),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            CV2_RED,
-            2,
+            roi_detected,
         )
 
         # Display the current datetime.
@@ -317,9 +369,9 @@ try:
             timestamp_text,
             (20, height - 20),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
+            1.0,
             CV2_WHITE,
-            1,
+            2,
         )
 
         # ----------------------------------------
@@ -328,18 +380,19 @@ try:
         # Run YOLO detection and display every frame,
         # but save CSV and MP4 only once per second.
 
-        now = time.monotonic()  # Get the monotonic time in seconds.
+        now = time.monotonic()
 
         if now - last_record_time >= 1.0:
             measured_at = datetime.now()
 
-            roi1_result = 1 if roi1_detected else 0
-            roi2_result = 1 if roi2_detected else 0
+            roi_results = [
+                1 if detected else 0
+                for detected in roi_detected
+            ]
 
             write_csv(
                 measured_at,
-                roi1_result,
-                roi2_result,
+                roi_results,
             )
 
             # Switch the video file every hour.
@@ -367,9 +420,17 @@ try:
 
             last_record_time = now
 
+        # Resize only for display.
+        display_height = DISPLAY_HEIGHT
+        display_width = int(width * display_height / height)
+
+        display_frame = cv2.resize(
+            frame,
+            (display_width, display_height),
+        )
 
         # Display every frame.
-        cv2.imshow("Person Detection", frame)
+        cv2.imshow("Person Detection", display_frame)
 
         key = cv2.waitKey(1)
 
@@ -385,5 +446,3 @@ finally:
     camera.release()
 
     cv2.destroyAllWindows()
-
-
