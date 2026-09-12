@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Speed up camera initialization on some USB cameras
+# (Especially necessary when using Logitech USB cameras.)
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 
 import cv2
@@ -12,7 +13,7 @@ from ultralytics import YOLO
 
 
 # ================================================
-#   設定
+#   Settings
 # ================================================
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -22,53 +23,73 @@ CAMERA_NO = 0
 CONFIDENCE = 0.5        # default=0.25
 IOU_THRESHOLD = 0.3     # default=0.7
 
-# CSV保存
+# CSV settings
 CSV_DIR = BASE_DIR / "csv"
 CSV_DIR.mkdir(exist_ok=True)
 
-# 動画保存
+# Video settings
 MOVIE_DIR = BASE_DIR / "movie"
 MOVIE_DIR.mkdir(exist_ok=True)
 
 VIDEO_FPS = 1.0
+VIDEO_HEIGHT = 600      # Width is calculated automatically.
 
-# 作業エリア ROI1
+# Working area ROI1
 ROI1_ENABLE = True
 ROI1_X1 = 150
 ROI1_Y1 = 150
 ROI1_X2 = 550
 ROI1_Y2 = 450
 
-# 作業エリア ROI2
+# Working area ROI2
 ROI2_ENABLE = True
 ROI2_X1 = 600
 ROI2_Y1 = 150
-ROI2_X2 = 1000
+ROI2_X2 = 800
 ROI2_Y2 = 450
 
 
-def get_csv_path(measured_at):
+# ================================================
+#   Constants
+# ================================================
+# OpenCV colors (BGR)
+CV2_BLACK = (0, 0, 0)
+CV2_WHITE = (255, 255, 255)
+CV2_RED = (0, 0, 255)
+CV2_GREEN = (0, 255, 0)
+CV2_BLUE = (255, 0, 0)
+CV2_YELLOW = (0, 255, 255)
+CV2_CYAN = (255, 255, 0)
+CV2_MAGENTA = (255, 0, 255)
+CV2_ORANGE = (0, 165, 255)
+CV2_GRAY = (128, 128, 128)
+
+
+# ================================================
+#   Functions
+# ================================================
+def get_csv_path(measured_at: datetime) -> Path:
     filename = measured_at.strftime(
         "worker_detection_%Y%m%d.csv"
     )
     return CSV_DIR / filename
 
 
-def write_csv(measured_at, roi1_result, roi2_result):
+def write_csv(
+    measured_at: datetime,
+    roi1_result: int,
+    roi2_result: int,
+) -> None:
     csv_path = get_csv_path(measured_at)
     file_exists = csv_path.exists()
 
-    with csv_path.open(
-        "a",
-        newline="",
-        encoding="utf-8",
-    ) as csv_file:
+    with csv_path.open("a", newline="", encoding="utf-8") as csv_file:
         writer = csv.writer(csv_file)
 
         if not file_exists:
             writer.writerow(
                 [
-                    "measure_at",
+                    "measured_at",
                     "roi1_result",
                     "roi2_result",
                 ]
@@ -84,11 +105,13 @@ def write_csv(measured_at, roi1_result, roi2_result):
 
 
 def create_video_writer(
-    measured_at,
-    width,
-    height,
-):
-    # 1時間単位の開始時刻をファイル名にする
+    measured_at: datetime,
+    width: int,
+    height: int,
+) -> tuple[cv2.VideoWriter, datetime]:
+    """Create an MP4 video writer for the specified hour."""
+
+    # Use the start of the hour as the filename.
     hour_start = measured_at.replace(
         minute=0,
         second=0,
@@ -98,14 +121,16 @@ def create_video_writer(
     base_name = hour_start.strftime("%Y%m%d_%H00")
     video_path = MOVIE_DIR / f"{base_name}.mp4"
 
+    # Add a sequential number to the filename if it already exists.
     file_no = 2
-
     while video_path.exists():
         video_path = MOVIE_DIR / f"{base_name}_{file_no}.mp4"
         file_no += 1
 
+    # Set the MP4 video codec.
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
+    # Create the video writer.
     writer = cv2.VideoWriter(
         str(video_path),
         fourcc,
@@ -119,7 +144,9 @@ def create_video_writer(
     return writer, hour_start
 
 
-
+# ================================================
+#   Main Process
+# ================================================
 model = YOLO(MODEL_PATH)
 
 camera = cv2.VideoCapture(CAMERA_NO)
@@ -127,20 +154,37 @@ camera = cv2.VideoCapture(CAMERA_NO)
 if not camera.isOpened():
     raise RuntimeError("Camera could not be opened.")
 
-# カメラの画像サイズを取得
+# Set camera resolution.
+# (Check the resolutions available in the Windows Camera app.)
+camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+# Get the camera image size.
 width = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))
 height = int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-# 動画保存開始
+# Calculate the video resolution.
+video_height = VIDEO_HEIGHT
+video_width = int(width * video_height / height)
+
+# Make the width an even number.
+if video_width % 2 != 0:
+    video_width -= 1
+
+print(f"Camera resolution: {width} x {height}")
+print(f"Video resolution: {video_width} x {video_height}")
+
+
+# Start video recording.
 video_start_at = datetime.now()
 
 video_writer, video_hour_start = create_video_writer(
     video_start_at,
-    width,
-    height,
+    video_width,
+    video_height,
 )
 
-# 最後にCSV・動画へ保存した時刻
+# Time when the CSV and video were last saved.
 last_record_time = 0.0
 
 
@@ -151,20 +195,20 @@ try:
         if not success:
             break
 
-        # YOLOによる人物検出
-        # 毎フレーム実行する
+        # Detect persons using YOLO on every frame.
         result = model.predict(
             source=frame,
-            classes=[0],        # person を検出
+            classes=[0],        # Detect persons only.
             conf=CONFIDENCE,
             iou=IOU_THRESHOLD,
-            verbose=False,
+            verbose=False,      # Disable detailed output.
         )[0]
 
         roi1_detected = False
         roi2_detected = False
 
         for box in result.boxes:
+            # Get the bounding box coordinates.
             x1, y1, x2, y2 = box.xyxy[0].tolist()
 
             center_x = int((x1 + x2) / 2)
@@ -184,45 +228,45 @@ try:
                 ):
                     roi2_detected = True
 
-            # 人物のバウンディングボックス
+            # Person bounding box
             cv2.rectangle(
                 frame,
                 (int(x1), int(y1)),
                 (int(x2), int(y2)),
-                (0, 255, 0),
-                2,
+                CV2_GREEN,
+                2,                      # Thickness
             )
 
-            # 人物の中心点
+            # Person center point
             cv2.circle(
                 frame,
                 (center_x, center_y),
-                5,
-                (0, 0, 255),
-                -1,
+                5,                      # Radius
+                CV2_RED,
+                -1,                     # Filled circle
             )
 
-        # 作業エリア ROI1を描画
+        # Draw the ROI1 work area.
         if ROI1_ENABLE:
             cv2.rectangle(
                 frame,
                 (ROI1_X1, ROI1_Y1),
                 (ROI1_X2, ROI1_Y2),
-                (255, 0, 0),
-                3,
+                CV2_BLUE,
+                3,                      # Thickness
             )
 
-        # 作業エリア ROI2を描画
+        # Draw the ROI2 work area.
         if ROI2_ENABLE:
             cv2.rectangle(
                 frame,
                 (ROI2_X1, ROI2_Y1),
                 (ROI2_X2, ROI2_Y2),
-                (0, 255, 255),
-                3,
+                CV2_YELLOW,
+                3,                      # Thickness
             )
 
-        # ROI1の検出状態
+        # ROI1 detection status
         if ROI1_ENABLE:
             roi1_status = (
                 "ROI1: DETECTED"
@@ -238,11 +282,11 @@ try:
             (20, 40),
             cv2.FONT_HERSHEY_SIMPLEX,
             1.0,
-            (0, 0, 255),
+            CV2_RED,
             2,
         )
 
-        # ROI2の検出状態
+        # ROI2 detection status
         if ROI2_ENABLE:
             roi2_status = (
                 "ROI2: DETECTED"
@@ -258,11 +302,11 @@ try:
             (20, 80),
             cv2.FONT_HERSHEY_SIMPLEX,
             1.0,
-            (0, 0, 255),
+            CV2_RED,
             2,
         )
 
-        # 現在日時を画面に表示
+        # Display the current datetime.
         display_at = datetime.now()
         timestamp_text = display_at.strftime(
             "%Y-%m-%d %H:%M:%S"
@@ -274,16 +318,17 @@ try:
             (20, height - 20),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
-            (255, 255, 255),
+            CV2_WHITE,
             1,
         )
 
         # ----------------------------------------
-        # CSV・動画保存
+        # Save CSV and video
         # ----------------------------------------
-        # YOLO検出と画面表示は毎フレーム行うが、
-        # CSVとMP4への記録は1秒に1回だけ行う
-        now = time.monotonic()
+        # Run YOLO detection and display every frame,
+        # but save CSV and MP4 only once per second.
+
+        now = time.monotonic()  # Get the monotonic time in seconds.
 
         if now - last_record_time >= 1.0:
             measured_at = datetime.now()
@@ -297,7 +342,7 @@ try:
                 roi2_result,
             )
 
-            # 1時間ごとに動画ファイルを切り替える
+            # Switch the video file every hour.
             current_hour_start = measured_at.replace(
                 minute=0,
                 second=0,
@@ -309,27 +354,36 @@ try:
 
                 video_writer, video_hour_start = create_video_writer(
                     measured_at,
-                    width,
-                    height,
+                    video_width,
+                    video_height,
                 )
 
-            video_writer.write(frame)
+            video_frame = cv2.resize(
+                frame,
+                (video_width, video_height),
+            )
+
+            video_writer.write(video_frame)
 
             last_record_time = now
 
-        # 画面表示は毎フレーム
+
+        # Display every frame.
         cv2.imshow("Person Detection", frame)
 
         key = cv2.waitKey(1)
 
-        if key == 27:   # ESCキー押下時
+        if key == 27:   # key = ESC
             break
 
+
 finally:
-    # 動画ファイルを閉じる
+    # Release the video writer.
     video_writer.release()
 
-    # カメラを閉じる
+    # Close the camera.
     camera.release()
 
     cv2.destroyAllWindows()
+
+
