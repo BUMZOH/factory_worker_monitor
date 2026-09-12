@@ -1,20 +1,33 @@
+import os
 import time
 from datetime import datetime
+from pathlib import Path
+
+# Speed up camera initialization on some USB cameras
+os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 
 import cv2
 from ultralytics import YOLO
 
 
-MODEL_PATH = "yolov8n.pt"
+#================================================
+#   設定
+#================================================
+BASE_DIR = Path(__file__).resolve().parent
+
+MODEL_PATH = BASE_DIR / "yolov8n.pt"
 CAMERA_NO = 0
 
-CONFIDENCE = 0.5
+CONFIDENCE = 0.5        # default=0.25
+IOU_THRESHOLD = 0.3     # default=0.7
 
 # 動画保存
-now = datetime.now()
-VIDEO_PATH = "movie\\" + now.strftime(
+MOVIE_DIR = BASE_DIR / "movie"
+MOVIE_DIR.mkdir(exist_ok=True)
+VIDEO_PATH = MOVIE_DIR / datetime.now().strftime(
     "worker_detection_%Y%m%d_%H%M%S.mp4"
 )
+
 VIDEO_FPS = 1.0
 
 # 作業エリア
@@ -28,6 +41,9 @@ model = YOLO(MODEL_PATH)
 
 camera = cv2.VideoCapture(CAMERA_NO)
 
+if not camera.isOpened():
+    raise RuntimeError("Camera could not be opened.")
+
 # カメラの画像サイズを取得
 width = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))
 height = int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -36,11 +52,14 @@ height = int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
 video_writer = cv2.VideoWriter(
-    VIDEO_PATH,
+    str(VIDEO_PATH),
     fourcc,
     VIDEO_FPS,
     (width, height),
 )
+
+if not video_writer.isOpened():
+    raise RuntimeError("Video file could not be opened.")
 
 working = False
 work_start_time = None
@@ -62,6 +81,7 @@ while True:
         source=frame,
         classes=[0],        # person を検出
         conf=CONFIDENCE,
+        iou=IOU_THRESHOLD,
         verbose=False,      # コンソールへのログ出力を無効
     )[0]                    # source が画像1つの場合は [0]
 

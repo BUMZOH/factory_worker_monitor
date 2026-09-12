@@ -17,5 +17,8 @@ movie/
 # 画像ファイル
 image/
 
+# CSVファイル
+csv/
+
 # YOLO model files
 *.pt

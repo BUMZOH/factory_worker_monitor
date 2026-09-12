@@ -1,1 +1,5 @@
+# Run after activating the virtual environment
+# pip install -r requirements.txt
+
+# YOLO
 ultralytics
