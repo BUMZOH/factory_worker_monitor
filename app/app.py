@@ -1,12 +1,17 @@
 import csv
+import json
 import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 # Speed up camera initialization on some USB cameras
 # (Especially necessary when using Logitech USB cameras.)
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
+
+# Use TCP for more stable RTSP communication.
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 import cv2
 from ultralytics import YOLO
@@ -18,16 +23,22 @@ from ultralytics import YOLO
 BASE_DIR = Path(__file__).resolve().parent
 
 MODEL_PATH = BASE_DIR / "yolov8n.pt"
+CONFIG_PATH = BASE_DIR / "camera_config.json"
+
+# Camera type: "usb" or "network"
+CAMERA_TYPE = "network"
+
+# USB camera number
 CAMERA_NO = 0
 
-CONFIDENCE = 0.5        # default=0.25
+CONFIDENCE = 0.25        # default=0.25
 IOU_THRESHOLD = 0.3     # default=0.7
 
 # CSV settings
 CSV_DIR = BASE_DIR / "csv"
 CSV_DIR.mkdir(exist_ok=True)
 
-# Camera settings
+# USB camera settings
 # (Check the resolutions available in the Windows Camera app.)
 CAMERA_WIDTH = 1920
 CAMERA_HEIGHT = 1080
@@ -111,6 +122,65 @@ CV2_GRAY = (128, 128, 128)
 # ================================================
 #   Functions
 # ================================================
+def load_camera_config() -> dict:
+    """Load network camera settings from JSON file."""
+    with CONFIG_PATH.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def create_rtsp_url(config: dict) -> str:
+    """Create the RTSP URL for the network camera."""
+    username = quote(config["username"], safe="")
+    password = quote(config["password"], safe="")
+
+    return (
+        f"rtsp://{username}:{password}"
+        f"@{config['camera_ip']}:{config['camera_port']}"
+        f"/stream{config['stream_no']}"
+    )
+
+
+def open_camera():
+    """Open the selected USB or network camera."""
+    if CAMERA_TYPE == "usb":
+        camera = cv2.VideoCapture(CAMERA_NO)
+
+        if not camera.isOpened():
+            raise RuntimeError("USB camera could not be opened.")
+
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+
+        print(f"Camera type: USB (No. {CAMERA_NO})")
+
+        return camera
+
+    if CAMERA_TYPE == "network":
+        config = load_camera_config()
+        rtsp_url = create_rtsp_url(config)
+
+        camera = cv2.VideoCapture(
+            rtsp_url,
+            cv2.CAP_FFMPEG,
+        )
+
+        if not camera.isOpened():
+            raise RuntimeError("Network camera could not be opened.")
+
+        print("Camera type: Network")
+        print(
+            f"Camera address: "
+            f"{config['camera_ip']}:{config['camera_port']}"
+        )
+        print(f"RTSP stream: stream{config['stream_no']}")
+
+        return camera
+
+    raise ValueError(
+        'CAMERA_TYPE must be "usb" or "network".'
+    )
+
+
 def get_csv_path(measured_at: datetime) -> Path:
     factory_date = measured_at
 
@@ -250,18 +320,14 @@ def create_video_writer(
 # ================================================
 model = YOLO(MODEL_PATH)
 
-camera = cv2.VideoCapture(CAMERA_NO)
-
-if not camera.isOpened():
-    raise RuntimeError("Camera could not be opened.")
-
-# Set camera resolution.
-camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
-camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+camera = open_camera()
 
 # Get the camera image size.
 width = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))
 height = int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+if width <= 0 or height <= 0:
+    raise RuntimeError("Camera resolution could not be obtained.")
 
 # Calculate the video resolution.
 video_height = VIDEO_HEIGHT
@@ -436,7 +502,6 @@ try:
 
         if key == 27:   # key = ESC
             break
-
 
 finally:
     # Release the video writer.

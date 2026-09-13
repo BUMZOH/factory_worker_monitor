@@ -22,3 +22,6 @@ csv/
 
 # YOLO model files
 *.pt
+
+# tapo network camera settings
+camera_config.json
