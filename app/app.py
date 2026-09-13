@@ -31,7 +31,7 @@ CAMERA_TYPE = "network"
 # USB camera number
 CAMERA_NO = 0
 
-CONFIDENCE = 0.25        # default=0.25
+CONFIDENCE = 0.25       # default=0.25
 IOU_THRESHOLD = 0.3     # default=0.7
 
 # CSV settings
