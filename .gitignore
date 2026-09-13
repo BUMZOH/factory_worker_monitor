@@ -20,6 +20,9 @@ image/
 # CSVファイル
 csv/
 
+# カメラ画像ファイル
+image/
+
 # YOLO model files
 *.pt
 

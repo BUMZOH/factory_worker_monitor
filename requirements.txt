@@ -6,3 +6,9 @@ ultralytics
 
 # OpenCV
 opencv-python
+
+# pandas
+pandas
+
+# scipy
+scipy

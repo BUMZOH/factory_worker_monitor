@@ -44,8 +44,8 @@ CAMERA_WIDTH = 1920
 CAMERA_HEIGHT = 1080
 
 # Save raw camera image at startup.
-SAVE_IMAGE = False
-IMAGE_PATH = Path.home() / "Desktop" / "worker_detect.png"
+SAVE_IMAGE = True
+IMAGE_PATH = BASE_DIR / "image" / "camera_image.png"
 
 # Video settings
 MOVIE_DIR = BASE_DIR / "movie"
@@ -219,6 +219,55 @@ def write_csv(
         writer.writerow(row)
 
 
+
+def get_raw_detection_csv_path(measured_at: datetime) -> Path:
+    """Return the raw detection CSV path for the factory date."""
+    factory_date = measured_at
+
+    if measured_at.hour < 4:
+        factory_date = measured_at - timedelta(days=1)
+
+    filename = factory_date.strftime(
+        "detection_raw_data_%Y%m%d.csv"
+    )
+
+    return CSV_DIR / filename
+
+
+def write_raw_detection_csv(
+    measured_at: datetime,
+    detections: list[tuple[int, int, float]],
+) -> None:
+    """Write raw YOLO detection results to CSV."""
+    if not detections:
+        return
+
+    csv_path = get_raw_detection_csv_path(measured_at)
+    file_exists = csv_path.exists()
+
+    with csv_path.open("a", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+
+        if not file_exists:
+            writer.writerow(
+                [
+                    "measured_at",
+                    "center_x",
+                    "center_y",
+                    "confidence",
+                ]
+            )
+
+        for center_x, center_y, confidence in detections:
+            writer.writerow(
+                [
+                    measured_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    center_x,
+                    center_y,
+                    f"{confidence:.6f}",
+                ]
+            )
+
 def check_roi_detection(
     center_x: int,
     center_y: int,
@@ -386,12 +435,23 @@ try:
             for _ in ROI_SETTINGS
         ]
 
+        raw_detections = []
+
         for box in result.boxes:
             # Get the bounding box coordinates.
             x1, y1, x2, y2 = box.xyxy[0].tolist()
 
             center_x = int((x1 + x2) / 2)
             center_y = int((y1 + y2) / 2)
+            confidence = float(box.conf[0])
+
+            raw_detections.append(
+                (
+                    center_x,
+                    center_y,
+                    confidence,
+                )
+            )
 
             # Check all ROIs.
             check_roi_detection(
@@ -459,6 +519,11 @@ try:
             write_csv(
                 measured_at,
                 roi_results,
+            )
+
+            write_raw_detection_csv(
+                measured_at,
+                raw_detections,
             )
 
             # Switch the video file every hour.
