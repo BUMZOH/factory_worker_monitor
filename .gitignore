@@ -26,5 +26,5 @@ image/
 # YOLO model files
 *.pt
 
-# tapo network camera settings
-camera_config.json
+# tapo network camera login information
+network_camera_login.json

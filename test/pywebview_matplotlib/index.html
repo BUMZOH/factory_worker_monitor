@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Matplotlib Sample</title>
+</head>
+
+<body>
+
+    <h1>Matplotlib Sample</h1>
+
+    <input
+        type="text"
+        id="targetDate"
+        value="20260915"
+    >
+
+    <button onclick="showGraph1()">
+        グラフ1表示
+    </button>
+
+    <script>
+        async function showGraph1() {
+            const targetDate =
+                document.getElementById("targetDate").value;
+
+            await window.pywebview.api.show_graph1(
+                targetDate
+            );
+        }
+    </script>
+
+</body>
+
+</html>
