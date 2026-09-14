@@ -45,7 +45,9 @@ CAMERA_HEIGHT = 1080
 
 # Save raw camera image at startup.
 SAVE_IMAGE = True
-IMAGE_PATH = BASE_DIR / "image" / "camera_image.png"
+IMAGE_DIR = BASE_DIR / "image"
+IMAGE_DIR.mkdir(exist_ok=True)
+IMAGE_PATH = IMAGE_DIR / "camera_image.png"
 
 # Video settings
 MOVIE_DIR = BASE_DIR / "movie"
@@ -63,18 +65,18 @@ ROI_SETTINGS = [
     {
         "name": "ROI1",
         "enable": True,
-        "x1": 600,
-        "y1": 340,
-        "x2": 1260,
-        "y2": 1060,
+        "x1": 350,
+        "y1": 425,
+        "x2": 870,
+        "y2": 1150,
     },
     {
         "name": "ROI2",
         "enable": True,
-        "x1": 790,
-        "y1": 290,
-        "x2": 1440,
-        "y2": 940,
+        "x1": 1580,
+        "y1": 450,
+        "x2": 2150,
+        "y2": 1260,
     },
     {
         "name": "ROI3",

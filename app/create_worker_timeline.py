@@ -407,7 +407,7 @@ if __name__ == "__main__":
         target_date = "2026-09-12"
 
     csv_path = CSV_DIR / (
-        f"worker_detection_{target_date.replace("-","")}.csv"
+        f"worker_detection_{target_date.replace('-','')}.csv"
     )
 
     timeline_data = load_timeline_data(
