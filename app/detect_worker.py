@@ -23,7 +23,8 @@ from ultralytics import YOLO
 BASE_DIR = Path(__file__).resolve().parent
 
 MODEL_PATH = BASE_DIR / "yolov8n.pt"
-CONFIG_PATH = BASE_DIR / "camera_config.json"
+SETTINGS_PATH = BASE_DIR / "settings.json"
+LOGIN_PATH = BASE_DIR / "network_camera_login.json"
 
 # Camera type: "usb" or "network"
 CAMERA_TYPE = "network"
@@ -60,50 +61,6 @@ VIDEO_HEIGHT = 540      # Width is calculated automatically.
 # (Set DISPLAY_HEIGHT smaller to allow for the taskbar and title bar.)
 DISPLAY_HEIGHT = 1000   # Width is calculated automatically.
 
-# Working area settings
-ROI_SETTINGS = [
-    {
-        "name": "ROI1",
-        "enable": True,
-        "x1": 350,
-        "y1": 425,
-        "x2": 870,
-        "y2": 1150,
-    },
-    {
-        "name": "ROI2",
-        "enable": True,
-        "x1": 1580,
-        "y1": 450,
-        "x2": 2150,
-        "y2": 1260,
-    },
-    {
-        "name": "ROI3",
-        "enable": False,
-        "x1": 100,
-        "y1": 100,
-        "x2": 300,
-        "y2": 300,
-    },
-    {
-        "name": "ROI4",
-        "enable": False,
-        "x1": 100,
-        "y1": 100,
-        "x2": 300,
-        "y2": 300,
-    },
-    {
-        "name": "ROI5",
-        "enable": False,
-        "x1": 100,
-        "y1": 100,
-        "x2": 300,
-        "y2": 300,
-    },
-]
-
 
 # ================================================
 #   Constants
@@ -124,16 +81,25 @@ CV2_GRAY = (128, 128, 128)
 # ================================================
 #   Functions
 # ================================================
-def load_camera_config() -> dict:
-    """Load network camera settings from JSON file."""
-    with CONFIG_PATH.open("r", encoding="utf-8") as file:
+def load_settings() -> dict:
+    """Load application settings from JSON file."""
+    with SETTINGS_PATH.open("r", encoding="utf-8") as file:
         return json.load(file)
 
 
-def create_rtsp_url(config: dict) -> str:
+def load_network_camera_login() -> dict:
+    """Load network camera login information from JSON file."""
+    with LOGIN_PATH.open("r", encoding="utf-8") as file:
+        return json.load(file)
+    
+
+def create_rtsp_url(
+    config: dict,
+    login: dict,
+) -> str:
     """Create the RTSP URL for the network camera."""
-    username = quote(config["username"], safe="")
-    password = quote(config["password"], safe="")
+    username = quote(login["username"], safe="")
+    password = quote(login["password"], safe="")
 
     return (
         f"rtsp://{username}:{password}"
@@ -158,8 +124,14 @@ def open_camera():
         return camera
 
     if CAMERA_TYPE == "network":
-        config = load_camera_config()
-        rtsp_url = create_rtsp_url(config)
+        settings = load_settings()
+        config = settings["network_camera"]
+        login = load_network_camera_login()
+
+        rtsp_url = create_rtsp_url(
+            config,
+            login,
+        )
 
         camera = cv2.VideoCapture(
             rtsp_url,
@@ -208,7 +180,7 @@ def write_csv(
         if not file_exists:
             header = ["measured_at"]
 
-            for roi_no in range(len(ROI_SETTINGS)):
+            for roi_no in range(len(roi_settings)):
                 header.append(f"roi{roi_no + 1}_result")
 
             writer.writerow(header)
@@ -276,7 +248,7 @@ def check_roi_detection(
     roi_detected: list[bool],
 ) -> None:
     """Check whether a person's center point is inside each ROI."""
-    for index, roi in enumerate(ROI_SETTINGS):
+    for index, roi in enumerate(roi_settings):
         if not roi["enable"]:
             continue
 
@@ -292,7 +264,7 @@ def draw_rois(
     roi_detected: list[bool],
 ) -> None:
     """Draw all enabled ROIs and their detection status."""
-    for index, roi in enumerate(ROI_SETTINGS):
+    for index, roi in enumerate(roi_settings):
         if not roi["enable"]:
             continue
 
@@ -369,6 +341,9 @@ def create_video_writer(
 # ================================================
 #   Main Process
 # ================================================
+settings = load_settings()
+roi_settings = settings["roi_settings"]
+
 model = YOLO(MODEL_PATH)
 
 camera = open_camera()
@@ -434,7 +409,7 @@ try:
         # Detection status for each ROI.
         roi_detected = [
             False
-            for _ in ROI_SETTINGS
+            for _ in roi_settings
         ]
 
         raw_detections = []

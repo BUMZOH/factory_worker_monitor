@@ -2,6 +2,7 @@ import csv
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -9,11 +10,8 @@ from PIL import Image, ImageDraw, ImageFont
 #   Settings
 # ================================================
 BASE_DIR = Path(__file__).resolve().parent
+
 CSV_DIR = BASE_DIR / "csv"
-
-CSV_PATH = CSV_DIR / "worker_detection_20260912.csv"
-TARGET_DATE = "2026-09-12"
-
 
 # ================================================
 #   Constants
@@ -113,7 +111,7 @@ def get_target_period(
     """Return the target period from 04:00 to next-day 04:00."""
     start_at = datetime.strptime(
         f"{target_date} {TIMELINE_START_HOUR:02d}:00:00",
-        "%Y-%m-%d %H:%M:%S",
+        "%Y%m%d %H:%M:%S",
     )
 
     end_at = start_at + timedelta(days=1)
@@ -402,12 +400,21 @@ def create_timeline_image(
 # ================================================
 if __name__ == "__main__":
 
-    target_date = input('Input target date like "YYYY-MM-DD": ')
-    if target_date == "":
-        target_date = "2026-09-12"
+    target_date = input('Input target date like "YYYYMMDD" (YYYY optional): ')
+
+    if len(target_date) == 4:
+        current_year = datetime.now().year
+        target_date = f"{current_year}{target_date}"
+
+    # Validate input
+    if len(target_date) != 8 or not target_date.isdigit():
+        raise ValueError("Date must be YYYYMMDD or MMDD.")
+
+    datetime.strptime(target_date, "%Y%m%d")
+
 
     csv_path = CSV_DIR / (
-        f"worker_detection_{target_date.replace('-','')}.csv"
+        f"worker_detection_{target_date}.csv"
     )
 
     timeline_data = load_timeline_data(
@@ -420,8 +427,11 @@ if __name__ == "__main__":
         target_date,
     )
 
+    date_for_display = (
+        f"{target_date[:4]}-{target_date[4:6]}-{target_date[6:]}"
+    )
     title = (
-        f"Worker Detection Timeline  {target_date} "
+        f"Worker Detection Timeline  {date_for_display} "
         "04:00 - next day 03:59"
     )
 
@@ -432,4 +442,6 @@ if __name__ == "__main__":
     )
 
     # Display on screen instead of saving an image file.
-    image.show()
+    plt.imshow(image)
+    plt.axis("off")
+    plt.show()

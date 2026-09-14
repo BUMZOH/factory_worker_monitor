@@ -1,0 +1,50 @@
+{
+    "network_camera": {
+        "camera_ip": "192.168.1.55",
+        "camera_port": 554,
+        "stream_no": 1
+    },
+
+    "roi_settings": [
+        {
+            "name": "ROI1",
+            "enable": true,
+            "x1": 350,
+            "y1": 425,
+            "x2": 870,
+            "y2": 1150
+        },
+        {
+            "name": "ROI2",
+            "enable": true,
+            "x1": 1580,
+            "y1": 450,
+            "x2": 2150,
+            "y2": 1260
+        },
+        {
+            "name": "ROI3",
+            "enable": false,
+            "x1": 100,
+            "y1": 100,
+            "x2": 300,
+            "y2": 300
+        },
+        {
+            "name": "ROI4",
+            "enable": false,
+            "x1": 100,
+            "y1": 100,
+            "x2": 300,
+            "y2": 300
+        },
+        {
+            "name": "ROI5",
+            "enable": false,
+            "x1": 100,
+            "y1": 100,
+            "x2": 300,
+            "y2": 300
+        }
+    ]
+}

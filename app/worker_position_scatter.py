@@ -1,4 +1,6 @@
 from pathlib import Path
+from datetime import datetime
+
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -36,6 +38,17 @@ TEXT_SIZE = 12
 target_date = input(
     "Enter the target date in YYYYMMDD format: "
 )
+
+if len(target_date) == 4:
+    current_year = datetime.now().year
+    target_date = f"{current_year}{target_date}"
+
+# Validate input
+if len(target_date) != 8 or not target_date.isdigit():
+    raise ValueError("Date must be YYYYMMDD or MMDD.")
+
+datetime.strptime(target_date, "%Y%m%d")
+
 
 csv_path = (
     BASE_DIR
