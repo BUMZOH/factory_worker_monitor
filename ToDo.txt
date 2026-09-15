@@ -1,19 +1,31 @@
-
+## ToDo
 - 設定情報の外部ファイル化 (JSONファイル化)
 - CSVファイルのSQLite化
 - 複数カメラ化 (とりあえず2カメラへ拡張)
-- ネットワークカメラ対応
 - ネットワークカメラ使用時に通信量を減らす工夫
-- 
+- リモート保存場所をJSONファイルで設定する
 
-- 現段階では結果(作業者タイムライン)だけわかればいい
+<Version2 仕様>
+- detect_worker.py でROIごとの検知結果を記録しない(worker_detection_XXXXXXXX.csvは廃止)
+- detect_worker.py で worker_position_scatter.py で実施している縦横の分割線(グリッド)は表示する
+- 分割設定はsettings.json で定義する(worker_position_scatter.pyも利用する)
+- 分割設定は領域のマトリックスとして使用する。例えば area[0,0] は左上の領域
+- ROI は 分割領域の組み合わせとして表現する。例えば
+    ROI1 = area[0,0] + area[0,1]
+    ROI2 = area[4,2] + area[5,2]
+- create_worker_timeline.py はこの ROI設定をもとに時間を算出する。
 
 
 
-<NEXT IDEA>
+## Completed ToDo
+- ネットワークカメラ対応
 - ROIに分けず、視野全体に対して作業者を検知したポイントを全て記録する
 - 散布図としてマーカーを重ねる(よくいる場所ほど濃くなる)
 - 適当に分割して領域ごとに作業者がいた時間を累積する(区画ごとにサーモグラフィー表示する)
+
+
+
+
 
 
 

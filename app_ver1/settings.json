@@ -5,42 +5,46 @@
         "stream_no": 1
     },
 
-    "grid": {
-        "rows": 5,
-        "cols": 8
-    },
-
     "roi_settings": [
         {
             "name": "ROI1",
             "enable": true,
-            "areas": [
-                [3, 5],
-                [3, 6]
-            ]
+            "x1": 350,
+            "y1": 425,
+            "x2": 870,
+            "y2": 1150
         },
         {
             "name": "ROI2",
             "enable": true,
-            "areas": [
-                [2, 1],
-                [2, 2]
-            ]
+            "x1": 1580,
+            "y1": 450,
+            "x2": 2150,
+            "y2": 1260
         },
         {
             "name": "ROI3",
             "enable": false,
-            "areas": []
+            "x1": 100,
+            "y1": 100,
+            "x2": 300,
+            "y2": 300
         },
         {
             "name": "ROI4",
             "enable": false,
-            "areas": []
+            "x1": 100,
+            "y1": 100,
+            "x2": 300,
+            "y2": 300
         },
         {
             "name": "ROI5",
             "enable": false,
-            "areas": []
+            "x1": 100,
+            "y1": 100,
+            "x2": 300,
+            "y2": 300
         }
     ]
 }

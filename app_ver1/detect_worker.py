@@ -209,6 +209,45 @@ def image_update_worker(stop_event: threading.Event) -> None:
             print(f"Scatter image update failed: {error}")
 
 
+def get_csv_path(measured_at: datetime) -> Path:
+    factory_date = measured_at
+
+    if measured_at.hour < 4:
+        factory_date = measured_at - timedelta(days=1)
+
+    filename = factory_date.strftime(
+        "worker_detection_%Y%m%d.csv"
+    )
+    return CSV_DIR / filename
+
+
+def write_csv(
+    measured_at: datetime,
+    roi_results: list[int],
+) -> None:
+    csv_path = get_csv_path(measured_at)
+    file_exists = csv_path.exists()
+
+    with csv_path.open("a", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+
+        if not file_exists:
+            header = ["measured_at"]
+
+            for roi_no in range(len(roi_settings)):
+                header.append(f"roi{roi_no + 1}_result")
+
+            writer.writerow(header)
+
+        row = [
+            measured_at.strftime("%Y-%m-%d %H:%M:%S"),
+            *roi_results,
+        ]
+
+        writer.writerow(row)
+
+
+
 def get_raw_detection_csv_path(measured_at: datetime) -> Path:
     """Return the raw detection CSV path for the factory date."""
     factory_date = measured_at
@@ -228,6 +267,9 @@ def write_raw_detection_csv(
     detections: list[tuple[int, int, float]],
 ) -> None:
     """Write raw YOLO detection results to CSV."""
+    if not detections:
+        return
+
     csv_path = get_raw_detection_csv_path(measured_at)
     file_exists = csv_path.exists()
 
@@ -244,17 +286,6 @@ def write_raw_detection_csv(
                 ]
             )
 
-        if not detections:
-            writer.writerow(
-                [
-                    measured_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    "",
-                    "",
-                    "",
-                ]
-            )
-            return
-
         for center_x, center_y, confidence in detections:
             writer.writerow(
                 [
@@ -265,50 +296,59 @@ def write_raw_detection_csv(
                 ]
             )
 
+def check_roi_detection(
+    center_x: int,
+    center_y: int,
+    roi_detected: list[bool],
+) -> None:
+    """Check whether a person's center point is inside each ROI."""
+    for index, roi in enumerate(roi_settings):
+        if not roi["enable"]:
+            continue
 
-def draw_grid(frame, rows: int, cols: int) -> None:
-    """Draw the area grid on the camera image."""
-    height, width = frame.shape[:2]
+        if (
+            roi["x1"] <= center_x <= roi["x2"]
+            and roi["y1"] <= center_y <= roi["y2"]
+        ):
+            roi_detected[index] = True
 
-    cell_width = width / cols
-    cell_height = height / rows
 
-    for col in range(1, cols):
-        x = int(col * cell_width)
+def draw_rois(
+    frame,
+    roi_detected: list[bool],
+) -> None:
+    """Draw all enabled ROIs and their detection status."""
+    for index, roi in enumerate(roi_settings):
+        if not roi["enable"]:
+            continue
 
-        cv2.line(
+        detected = roi_detected[index]
+
+        color = CV2_RED if detected else CV2_BLUE
+
+        cv2.rectangle(
             frame,
-            (x, 0),
-            (x, height),
-            CV2_WHITE,
-            1,
+            (roi["x1"], roi["y1"]),
+            (roi["x2"], roi["y2"]),
+            color,
+            3,
         )
 
-    for row in range(1, rows):
-        y = int(row * cell_height)
-
-        cv2.line(
-            frame,
-            (0, y),
-            (width, y),
-            CV2_WHITE,
-            1,
+        status = (
+            f'{roi["name"]}: DETECTED'
+            if detected
+            else f'{roi["name"]}: NOT DETECTED'
         )
 
-    for row in range(rows):
-        for col in range(cols):
-            x = int(col * cell_width) + 10
-            y = int(row * cell_height) + 30
-
-            cv2.putText(
-                frame,
-                f"{row},{col}",
-                (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                CV2_YELLOW,
-                2,
-            )
+        cv2.putText(
+            frame,
+            status,
+            (roi["x1"], roi["y1"] - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            color,
+            2,
+        )
 
 
 def create_video_writer(
@@ -356,10 +396,7 @@ def create_video_writer(
 #   Main Process
 # ================================================
 settings = load_settings()
-
-grid_settings = settings["grid"]
-grid_rows = grid_settings["rows"]
-grid_cols = grid_settings["cols"]
+roi_settings = settings["roi_settings"]
 
 model = YOLO(MODEL_PATH)
 
@@ -435,6 +472,11 @@ try:
             verbose=False,      # Disable detailed output.
         )[0]
 
+        # Detection status for each ROI.
+        roi_detected = [
+            False
+            for _ in roi_settings
+        ]
 
         raw_detections = []
 
@@ -454,6 +496,12 @@ try:
                 )
             )
 
+            # Check all ROIs.
+            check_roi_detection(
+                center_x,
+                center_y,
+                roi_detected,
+            )
 
             # Person bounding box
             cv2.rectangle(
@@ -473,8 +521,11 @@ try:
                 -1,                     # Filled circle
             )
 
-
-        draw_grid(frame, grid_rows, grid_cols)
+        # Draw all enabled ROIs.
+        draw_rois(
+            frame,
+            roi_detected,
+        )
 
         # Display the current datetime.
         display_at = datetime.now()
@@ -502,6 +553,16 @@ try:
 
         if now - last_record_time >= 1.0:
             measured_at = datetime.now()
+
+            roi_results = [
+                1 if detected else 0
+                for detected in roi_detected
+            ]
+
+            write_csv(
+                measured_at,
+                roi_results,
+            )
 
             write_raw_detection_csv(
                 measured_at,

@@ -1,8 +1,8 @@
 import csv
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -11,27 +11,15 @@ from PIL import Image, ImageDraw, ImageFont
 # ================================================
 BASE_DIR = Path(__file__).resolve().parent
 
+SETTINGS_PATH = BASE_DIR / "settings.json"
+
 CSV_DIR = BASE_DIR / "csv"
+IMAGE_DIR = BASE_DIR / "image"
+
 
 # ================================================
 #   Constants
 # ================================================
-ROI_NAMES = [
-    "ROI1",
-    "ROI2",
-    "ROI3",
-    "ROI4",
-    "ROI5",
-]
-
-ROI_COLUMNS = [
-    "roi1_result",
-    "roi2_result",
-    "roi3_result",
-    "roi4_result",
-    "roi5_result",
-]
-
 ROI_COLORS = [
     "limegreen",
     "blue",
@@ -59,6 +47,15 @@ TIMELINE_Y2 = 200
 # ================================================
 #   Functions
 # ================================================
+def load_settings() -> dict:
+    """Load application settings from JSON file."""
+    with SETTINGS_PATH.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
+        return json.load(file)
+
+
 def get_font(
     size: int,
 ) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -72,45 +69,13 @@ def get_font(
         return ImageFont.load_default()
 
 
-def get_roi_results(row: dict) -> list[int]:
-    """Get all ROI results from one CSV row."""
-    roi_results = []
-
-    for column in ROI_COLUMNS:
-        result = int(row.get(column, 0))
-        roi_results.append(result)
-
-    return roi_results
-
-
-def get_status_color(
-    roi_results: list[int],
-) -> str:
-    """Convert ROI results to a timeline color."""
-    detected_count = sum(roi_results)
-
-    # Two or more ROIs detected at the same time.
-    if detected_count >= 2:
-        return COLOR_MULTIPLE
-
-    # No ROI detected.
-    if detected_count == 0:
-        return COLOR_STOP
-
-    # Only one ROI detected.
-    for index, result in enumerate(roi_results):
-        if result == 1:
-            return ROI_COLORS[index]
-
-    return COLOR_STOP
-
-
 def get_target_period(
     target_date: str,
 ) -> tuple[datetime, datetime]:
     """Return the target period from 04:00 to next-day 04:00."""
     start_at = datetime.strptime(
-        f"{target_date} {TIMELINE_START_HOUR:02d}:00:00",
+        f"{target_date} "
+        f"{TIMELINE_START_HOUR:02d}:00:00",
         "%Y%m%d %H:%M:%S",
     )
 
@@ -119,14 +84,82 @@ def get_target_period(
     return start_at, end_at
 
 
-def load_timeline_data(
+def get_grid_position(
+    center_x: float,
+    center_y: float,
+    image_width: int,
+    image_height: int,
+    grid_rows: int,
+    grid_cols: int,
+) -> tuple[int, int]:
+    """Convert center coordinates to a grid position."""
+    cell_width = image_width / grid_cols
+    cell_height = image_height / grid_rows
+
+    col = int(center_x / cell_width)
+    row = int(center_y / cell_height)
+
+    if col >= grid_cols:
+        col = grid_cols - 1
+
+    if row >= grid_rows:
+        row = grid_rows - 1
+
+    return row, col
+
+
+def get_roi_names(
+    row: int,
+    col: int,
+    roi_settings: list[dict],
+) -> list[str]:
+    """Return ROI names assigned to the specified grid cell."""
+    roi_names = []
+
+    for roi in roi_settings:
+        if not roi["enable"]:
+            continue
+
+        if [row, col] in roi["areas"]:
+            roi_names.append(roi["name"])
+
+    return roi_names
+
+
+def get_status_color(
+    active_roi_names: set[str],
+    roi_settings: list[dict],
+) -> str:
+    """Convert active ROI names to a timeline color."""
+    if len(active_roi_names) >= 2:
+        return COLOR_MULTIPLE
+
+    if not active_roi_names:
+        return COLOR_STOP
+
+    active_roi_name = next(iter(active_roi_names))
+
+    for index, roi in enumerate(roi_settings):
+        if roi["name"] == active_roi_name:
+            if index < len(ROI_COLORS):
+                return ROI_COLORS[index]
+
+    return COLOR_STOP
+
+
+def load_raw_data(
     csv_path: Path,
     target_date: str,
-) -> list[str]:
-    """Load 1440 minutes from 04:00 to 03:59 of the next day."""
+    image_width: int,
+    image_height: int,
+    grid_rows: int,
+    grid_cols: int,
+    roi_settings: list[dict],
+) -> list[dict]:
+    """Load raw detection data and add ROI information."""
     start_at, end_at = get_target_period(target_date)
 
-    minute_colors = {}
+    records = []
 
     with csv_path.open(
         "r",
@@ -135,24 +168,56 @@ def load_timeline_data(
     ) as csv_file:
         reader = csv.DictReader(csv_file)
 
-        for row in reader:
+        for csv_row in reader:
             measured_at = datetime.strptime(
-                row["measured_at"],
+                csv_row["measured_at"],
                 "%Y-%m-%d %H:%M:%S",
             )
-
-            # Use only data recorded exactly at second 0.
-            if measured_at.second != 0:
-                continue
 
             if not start_at <= measured_at < end_at:
                 continue
 
-            roi_results = get_roi_results(row)
+            center_x_text = csv_row["center_x"].strip()
+            center_y_text = csv_row["center_y"].strip()
 
-            minute_colors[measured_at] = get_status_color(
-                roi_results,
+            roi_names = []
+
+            if center_x_text and center_y_text:
+                center_x = float(center_x_text)
+                center_y = float(center_y_text)
+
+                row, col = get_grid_position(
+                    center_x,
+                    center_y,
+                    image_width,
+                    image_height,
+                    grid_rows,
+                    grid_cols,
+                )
+
+                roi_names = get_roi_names(
+                    row,
+                    col,
+                    roi_settings,
+                )
+
+            records.append(
+                {
+                    "measured_at": measured_at,
+                    "roi_names": roi_names,
+                }
             )
+
+    return records
+
+
+def create_timeline_data(
+    records: list[dict],
+    target_date: str,
+    roi_settings: list[dict],
+) -> list[str]:
+    """Create timeline colors using seconds 00 through 09."""
+    start_at, _ = get_target_period(target_date)
 
     timeline_data = []
 
@@ -161,9 +226,35 @@ def load_timeline_data(
             minutes=minute_no,
         )
 
-        color = minute_colors.get(
-            minute_at,
-            COLOR_NONE,
+        window_end = minute_at + timedelta(
+            seconds=10,
+        )
+
+        minute_records = [
+            record
+            for record in records
+            if (
+                minute_at
+                <= record["measured_at"]
+                < window_end
+            )
+        ]
+
+        # No record means that data itself is unavailable.
+        if not minute_records:
+            timeline_data.append(COLOR_NONE)
+            continue
+
+        active_roi_names = set()
+
+        for record in minute_records:
+            active_roi_names.update(
+                record["roi_names"]
+            )
+
+        color = get_status_color(
+            active_roi_names,
+            roi_settings,
         )
 
         timeline_data.append(color)
@@ -172,45 +263,31 @@ def load_timeline_data(
 
 
 def calculate_working_time(
-    csv_path: Path,
-    target_date: str,
-) -> list[float]:
+    records: list[dict],
+    roi_settings: list[dict],
+) -> dict[str, float]:
     """Calculate ROI working times using all records."""
-    start_at, end_at = get_target_period(target_date)
+    active_seconds = {
+        roi["name"]: set()
+        for roi in roi_settings
+        if roi["enable"]
+    }
 
-    working_counts = [
-        0
-        for _ in ROI_NAMES
-    ]
+    for record in records:
+        measured_at = record["measured_at"]
 
-    with csv_path.open(
-        "r",
-        newline="",
-        encoding="utf-8-sig",
-    ) as csv_file:
-        reader = csv.DictReader(csv_file)
+        for roi_name in record["roi_names"]:
+            if roi_name in active_seconds:
+                active_seconds[roi_name].add(
+                    measured_at
+                )
 
-        for row in reader:
-            measured_at = datetime.strptime(
-                row["measured_at"],
-                "%Y-%m-%d %H:%M:%S",
-            )
+    working_minutes = {}
 
-            if not start_at <= measured_at < end_at:
-                continue
-
-            roi_results = get_roi_results(row)
-
-            for index, result in enumerate(roi_results):
-                if result == 1:
-                    working_counts[index] += 1
-
-    # One CSV record represents approximately one second.
-    working_minutes = []
-
-    for count in working_counts:
-        minutes = count / 60.0
-        working_minutes.append(minutes)
+    for roi_name, seconds in active_seconds.items():
+        working_minutes[roi_name] = (
+            len(seconds) / 60.0
+        )
 
     return working_minutes
 
@@ -218,15 +295,22 @@ def calculate_working_time(
 def draw_legend(
     draw: ImageDraw.ImageDraw,
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    roi_settings: list[dict],
 ) -> None:
     """Draw the timeline legend."""
     legend_items = []
 
-    for index, roi_name in enumerate(ROI_NAMES):
+    for index, roi in enumerate(roi_settings):
+        if not roi["enable"]:
+            continue
+
+        if index >= len(ROI_COLORS):
+            continue
+
         legend_items.append(
             (
                 ROI_COLORS[index],
-                roi_name,
+                roi["name"],
             )
         )
 
@@ -272,20 +356,23 @@ def draw_legend(
 
 def draw_working_time(
     draw: ImageDraw.ImageDraw,
-    working_minutes: list[float],
+    working_minutes: dict[str, float],
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
 ) -> None:
-    """Draw working time for all ROIs."""
-    first_line = (
-        f"Working time at ROI1 = {working_minutes[0]:.1f} min.    "
-        f"ROI2 = {working_minutes[1]:.1f} min.    "
-        f"ROI3 = {working_minutes[2]:.1f} min."
-    )
+    """Draw working time for enabled ROIs."""
+    items = []
 
-    second_line = (
-        f"Working time at ROI4 = {working_minutes[3]:.1f} min.    "
-        f"ROI5 = {working_minutes[4]:.1f} min."
-    )
+    for roi_name, minutes in working_minutes.items():
+        items.append(
+            f"{roi_name} = {minutes:.1f} min."
+        )
+
+    first_line = "Working time at "
+
+    if items:
+        first_line += "    ".join(items[:3])
+    else:
+        first_line += "No enabled ROI"
 
     draw.text(
         (BASE_X, 340),
@@ -294,18 +381,23 @@ def draw_working_time(
         font=font,
     )
 
-    draw.text(
-        (BASE_X, 375),
-        second_line,
-        fill="black",
-        font=font,
-    )
+    if len(items) > 3:
+        second_line = "Working time at "
+        second_line += "    ".join(items[3:])
+
+        draw.text(
+            (BASE_X, 375),
+            second_line,
+            fill="black",
+            font=font,
+        )
 
 
 def create_timeline_image(
     timeline_data: list[str],
     title: str,
-    working_minutes: list[float],
+    working_minutes: dict[str, float],
+    roi_settings: list[dict],
 ) -> Image.Image:
     """Create a 1440-minute timeline image."""
     if len(timeline_data) != TIMELINE_MINUTES:
@@ -384,6 +476,7 @@ def create_timeline_image(
     draw_legend(
         draw,
         font_medium,
+        roi_settings,
     )
 
     draw_working_time(
@@ -395,12 +488,98 @@ def create_timeline_image(
     return image
 
 
+def save_timeline_image(target_date: str) -> Path:
+    """Create and save the timeline image."""
+    settings = load_settings()
+
+    grid_settings = settings["grid"]
+    grid_rows = grid_settings["rows"]
+    grid_cols = grid_settings["cols"]
+
+    roi_settings = settings["roi_settings"]
+
+    csv_path = (
+        CSV_DIR
+        / f"detection_raw_data_{target_date}.csv"
+    )
+
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"File is not found: {csv_path}"
+        )
+
+    camera_image_path = (
+        IMAGE_DIR
+        / "camera_image.png"
+    )
+
+    if not camera_image_path.exists():
+        raise FileNotFoundError(
+            f"File is not found: {camera_image_path}"
+        )
+
+    with Image.open(camera_image_path) as camera_image:
+        image_width = camera_image.width
+        image_height = camera_image.height
+
+    records = load_raw_data(
+        csv_path,
+        target_date,
+        image_width,
+        image_height,
+        grid_rows,
+        grid_cols,
+        roi_settings,
+    )
+
+    timeline_data = create_timeline_data(
+        records,
+        target_date,
+        roi_settings,
+    )
+
+    working_minutes = calculate_working_time(
+        records,
+        roi_settings,
+    )
+
+    date_for_display = (
+        f"{target_date[:4]}-"
+        f"{target_date[4:6]}-"
+        f"{target_date[6:]}"
+    )
+
+    title = (
+        f"Worker Detection Timeline "
+        f"{date_for_display} "
+        f"04:00 - next day 03:59"
+    )
+
+    image = create_timeline_image(
+        timeline_data,
+        title,
+        working_minutes,
+        roi_settings,
+    )
+
+    image_path = (
+        IMAGE_DIR
+        / f"worker_timeline_{target_date}.png"
+    )
+
+    image.save(image_path)
+
+    return image_path
+
+
 # ================================================
 #   Test code
 # ================================================
 if __name__ == "__main__":
-
-    target_date = input('Input target date like "YYYYMMDD" (YYYY optional): ')
+    target_date = input(
+        'Input target date like "YYYYMMDD" '
+        '(YYYY optional): '
+    )
 
     if len(target_date) == 4:
         current_year = datetime.now().year
@@ -408,40 +587,17 @@ if __name__ == "__main__":
 
     # Validate input
     if len(target_date) != 8 or not target_date.isdigit():
-        raise ValueError("Date must be YYYYMMDD or MMDD.")
+        raise ValueError(
+            "Date must be YYYYMMDD or MMDD."
+        )
 
-    datetime.strptime(target_date, "%Y%m%d")
-
-
-    csv_path = CSV_DIR / (
-        f"worker_detection_{target_date}.csv"
-    )
-
-    timeline_data = load_timeline_data(
-        csv_path,
+    datetime.strptime(
         target_date,
+        "%Y%m%d",
     )
 
-    working_minutes = calculate_working_time(
-        csv_path,
-        target_date,
+    image_path = save_timeline_image(
+        target_date
     )
 
-    date_for_display = (
-        f"{target_date[:4]}-{target_date[4:6]}-{target_date[6:]}"
-    )
-    title = (
-        f"Worker Detection Timeline  {date_for_display} "
-        "04:00 - next day 03:59"
-    )
-
-    image = create_timeline_image(
-        timeline_data,
-        title,
-        working_minutes,
-    )
-
-    # Display on screen instead of saving an image file.
-    plt.imshow(image)
-    plt.axis("off")
-    plt.show()
+    print(f"Image saved: {image_path}")
