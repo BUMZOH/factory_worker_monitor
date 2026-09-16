@@ -191,20 +191,29 @@ def copy_image_to_remote(image_path: Path) -> None:
         )
 
 
-def image_update_worker(stop_event: threading.Event) -> None:
+def image_update_worker(
+        stop_event: threading.Event,
+        remote_copy_enabled: bool,
+) -> None:
     """Update report images periodically."""
     while not stop_event.wait(IMAGE_UPDATE_INTERVAL):
         target_date = get_factory_date(datetime.now())
 
         try:
             image_path = save_timeline_image(target_date)
-            copy_image_to_remote(image_path)
+
+            if remote_copy_enabled:
+                copy_image_to_remote(image_path)
+
         except Exception as error:
             print(f"Timeline image update failed: {error}")
 
         try:
             image_path = save_worker_position_scatter(target_date)
-            copy_image_to_remote(image_path)
+
+            if remote_copy_enabled:
+                copy_image_to_remote(image_path)
+
         except Exception as error:
             print(f"Scatter image update failed: {error}")
 
@@ -357,6 +366,8 @@ def create_video_writer(
 # ================================================
 settings = load_settings()
 
+remote_copy_enabled = settings["remote_copy_enabled"]
+
 grid_settings = settings["grid"]
 grid_rows = grid_settings["rows"]
 grid_cols = grid_settings["cols"]
@@ -404,7 +415,7 @@ stop_event = threading.Event()
 
 image_thread = threading.Thread(
     target=image_update_worker,
-    args=(stop_event,),
+    args=(stop_event, remote_copy_enabled),
     daemon=True,
 )
 image_thread.start()
@@ -415,6 +426,10 @@ try:
         success, frame = camera.read()
 
         if not success:
+            print(
+                "Camera read failed: "
+                f"{datetime.now():%Y-%m-%d %H:%M:%S}"
+            )
             break
 
         # Save the raw camera image only once at startup.

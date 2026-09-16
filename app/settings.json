@@ -1,9 +1,13 @@
 {
     "network_camera": {
         "camera_ip": "172.20.1.115",
+        "_camera_ip_home": "192.168.1.55",
+        "_camera_ip_company": "172.20.1.115",
         "camera_port": 554,
         "stream_no": 1
     },
+
+    "remote_copy_enabled": true,
 
     "grid": {
         "rows": 5,
