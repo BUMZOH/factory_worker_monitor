@@ -1,12 +1,13 @@
 import csv
 import json
+import logging
 import os
+import shutil
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
-import shutil
-import threading
 
 from create_worker_timeline import save_timeline_image
 from worker_position_scatter import save_worker_position_scatter
@@ -31,14 +32,23 @@ MODEL_PATH = BASE_DIR / "yolov8n.pt"
 SETTINGS_PATH = BASE_DIR / "settings.json"
 LOGIN_PATH = BASE_DIR / "network_camera_login.json"
 
+# Log settings
+LOG_DIR = BASE_DIR / "log"
+LOG_DIR.mkdir(exist_ok=True)
+LOG_PATH = LOG_DIR / "app.log"
+
 # Camera type: "usb" or "network"
 CAMERA_TYPE = "network"
 
 # USB camera number
 CAMERA_NO = 0
 
-CONFIDENCE = 0.25       # default=0.25
+# Camera reconnect settings.
+CAMERA_RETRY_INTERVAL = 5.0
+
+CONFIDENCE = 0.30       # default=0.25
 IOU_THRESHOLD = 0.3     # default=0.7
+IMAGE_SIZE = 1280       # default=640
 
 # CSV settings
 CSV_DIR = BASE_DIR / "csv"
@@ -73,6 +83,17 @@ VIDEO_HEIGHT = 540      # Width is calculated automatically.
 # Display settings
 # (Set DISPLAY_HEIGHT smaller to allow for the taskbar and title bar.)
 DISPLAY_HEIGHT = 1000   # Width is calculated automatically.
+
+# Logging settings
+logging.basicConfig(
+    filename=LOG_PATH,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+logger = logging.getLogger(__name__)
+
 
 
 # ================================================
@@ -166,6 +187,91 @@ def open_camera():
     raise ValueError(
         'CAMERA_TYPE must be "usb" or "network".'
     )
+
+
+def reconnect_camera():
+    """Retry camera connection until it succeeds."""
+    while True:
+        print(
+            "Reconnecting to camera: "
+            f"{datetime.now():%Y-%m-%d %H:%M:%S}"
+        )
+        logger.info("Reconnecting to camera.")
+
+        try:
+            camera = open_camera()
+
+            print(
+                "Camera reconnected: "
+                f"{datetime.now():%Y-%m-%d %H:%M:%S}"
+            )
+            logger.info("Camera reconnected.")
+
+            return camera
+
+        except Exception as error:
+            print(f"Camera reconnect failed: {error}")
+            logger.warning(
+                "Camera reconnect failed: %s",
+                error,
+            )
+
+            time.sleep(CAMERA_RETRY_INTERVAL)
+
+
+class CameraReader:
+    """Continuously read frames from the camera."""
+
+    def __init__(self, camera):
+        self.camera = camera
+        self.frame = None
+        self.lock = threading.Lock()
+        self.stop_event = threading.Event()
+        self.thread = None
+
+    def start(self):
+        self.thread = threading.Thread(
+            target=self._update,
+            daemon=True,
+        )
+        self.thread.start()
+
+    def _update(self):
+        """Continuously update the latest frame."""
+        while not self.stop_event.is_set():
+            success, frame = self.camera.read()
+
+            if not success:
+                print("Camera read failed.")
+                logger.warning("Camera read failed.")
+
+                with self.lock:
+                    self.frame = None
+
+                self.camera.release()
+                time.sleep(CAMERA_RETRY_INTERVAL)
+                self.camera = reconnect_camera()
+
+                continue
+
+            with self.lock:
+                self.frame = frame
+
+    def read(self):
+        """Return a copy of the latest frame."""
+        with self.lock:
+            if self.frame is None:
+                return None
+
+            return self.frame.copy()
+
+    def stop(self):
+        """Stop the camera reader thread."""
+        self.stop_event.set()
+
+        if self.thread is not None:
+            self.thread.join(timeout=5.0)
+
 
 
 def get_factory_date(measured_at: datetime) -> str:
@@ -364,6 +470,8 @@ def create_video_writer(
 # ================================================
 #   Main Process
 # ================================================
+logger.info("Application started.")
+
 settings = load_settings()
 
 remote_copy_enabled = settings["remote_copy_enabled"]
@@ -375,6 +483,9 @@ grid_cols = grid_settings["cols"]
 model = YOLO(MODEL_PATH)
 
 camera = open_camera()
+
+camera_reader = CameraReader(camera)
+camera_reader.start()
 
 # Get the camera image size.
 width = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -423,14 +534,12 @@ image_thread.start()
 
 try:
     while True:
-        success, frame = camera.read()
+        frame = camera_reader.read()
 
-        if not success:
-            print(
-                "Camera read failed: "
-                f"{datetime.now():%Y-%m-%d %H:%M:%S}"
-            )
-            break
+        if frame is None:
+            time.sleep(0.01)
+            continue
+
 
         # Save the raw camera image only once at startup.
         if SAVE_IMAGE and not image_saved:
@@ -441,14 +550,21 @@ try:
 
             image_saved = True
 
+
         # Detect persons using YOLO on every frame.
+        start = time.perf_counter()
+
         result = model.predict(
             source=frame,
             classes=[0],        # Detect persons only.
             conf=CONFIDENCE,
             iou=IOU_THRESHOLD,
+            imgsz=IMAGE_SIZE,
             verbose=False,      # Disable detailed output.
         )[0]
+
+        elapsed = time.perf_counter() - start
+        # print(f"YOLO inference: {elapsed:.3f} sec")   # For Investigation
 
 
         raw_detections = []
@@ -565,7 +681,7 @@ try:
         if key == 27:   # key = ESC
             break
 
-        time.sleep(0.1)
+        time.sleep(0.2)
 
 finally:
     # Stop the report image update thread.
@@ -575,7 +691,12 @@ finally:
     # Release the video writer.
     video_writer.release()
 
+    # Stop the camera reader thread.
+    camera_reader.stop()
+
     # Close the camera.
     camera.release()
 
     cv2.destroyAllWindows()
+
+    logger.info("Application stopped.")

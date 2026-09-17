@@ -23,6 +23,9 @@ csv/
 # カメラ画像ファイル
 image/
 
+# ログファイル
+log/
+
 # YOLO model files
 *.pt
 
